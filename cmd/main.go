@@ -97,7 +97,7 @@ func processMessage(body []byte) {
 
 	// Split the message into parts based on ", "
 	parts := strings.Split(message, ", ")
-	if len(parts) != 3 {
+	if len(parts) < 3 {
 		log.Fatalf("Failed to parse message: input does not match format")
 	}
 
@@ -110,7 +110,11 @@ func processMessage(body []byte) {
 		case strings.HasPrefix(part, "dst="):
 			destination = strings.TrimPrefix(part, "dst=")
 		case strings.HasPrefix(part, "txt="):
-			text = strings.TrimPrefix(part, "txt=")
+			textPart := strings.TrimPrefix(part, "txt=")
+			if text != "" {
+				text += ", "
+			}
+			text += textPart
 		default:
 			log.Fatalf("Failed to parse message: unrecognized part format")
 		}
