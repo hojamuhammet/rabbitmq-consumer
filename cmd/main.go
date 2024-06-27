@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"log/slog"
 	"os"
 	"rabbitmq-consumer/config"
@@ -26,7 +25,7 @@ func main() {
 	var err error
 	logInstance, err = logger.SetupLogger(cfg.Env)
 	if err != nil {
-		slog.Error("failed to set up logger: %v", err)
+		slog.Error("failed to set up logger", "error", err)
 		os.Exit(1)
 	}
 
@@ -34,13 +33,15 @@ func main() {
 
 	rabbitMQConn, err = amqp.Dial(cfg.RabbitMQ.URL)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		logInstance.ErrorLogger.Error("Failed to connect to RabbitMQ", "error", err)
+		os.Exit(1)
 	}
 	defer rabbitMQConn.Close()
 
 	db, err = sql.Open("mysql", cfg.Database.Addr)
 	if err != nil {
-		log.Fatalf("Failed to connect to MySQL: %v", err)
+		logInstance.ErrorLogger.Error("Failed to connect to MySQL", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
@@ -50,7 +51,8 @@ func main() {
 func consumeMessages() {
 	channel, err := rabbitMQConn.Channel()
 	if err != nil {
-		log.Fatalf("Failed to open a channel: %v", err)
+		logInstance.ErrorLogger.Error("Failed to open a channel", "error", err)
+		return
 	}
 	defer channel.Close()
 
@@ -63,7 +65,8 @@ func consumeMessages() {
 		nil,               // arguments
 	)
 	if err != nil {
-		log.Fatalf("Failed to declare a queue: %v", err)
+		logInstance.ErrorLogger.Error("Failed to declare a queue", "error", err)
+		return
 	}
 
 	msgs, err := channel.Consume(
@@ -76,32 +79,32 @@ func consumeMessages() {
 		nil,        // args
 	)
 	if err != nil {
-		log.Fatalf("Failed to register a consumer: %v", err)
+		logInstance.ErrorLogger.Error("Failed to register a consumer", "error", err)
+		return
 	}
 
 	forever := make(chan bool)
 
 	go func() {
 		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
+			logInstance.InfoLogger.Info("Received a message", "message", string(d.Body))
 			processMessage(d.Body)
 		}
 	}()
 
-	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
+	logInstance.InfoLogger.Info("Waiting for messages. To exit press CTRL+C")
 	<-forever
 }
 
 func processMessage(body []byte) {
 	message := string(body)
 
-	// Split the message into parts based on ", "
 	parts := strings.Split(message, ", ")
 	if len(parts) < 3 {
-		log.Fatalf("Failed to parse message: input does not match format")
+		logInstance.ErrorLogger.Error("Failed to parse message: input does not match format", "message", message)
+		return
 	}
 
-	// Extract source, destination, and text from parts
 	var source, destination, text string
 	for _, part := range parts {
 		switch {
@@ -116,36 +119,31 @@ func processMessage(body []byte) {
 			}
 			text += textPart
 		default:
-			log.Fatalf("Failed to parse message: unrecognized part format")
+			logInstance.ErrorLogger.Error("Failed to parse message: unrecognized part format", "part", part)
+			return
 		}
 	}
 
-	// Check if the user already exists
-	var userID sql.NullInt64
+	var userID int64
 	err := db.QueryRow("SELECT id FROM users WHERE login = ?", destination).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// User does not exist, so create a new user
-			_, err := db.Exec(
-				"INSERT INTO users (login) VALUES (?)",
-				destination,
-			)
-			if err != nil {
-				log.Fatalf("Failed to insert new user: %v", err)
-			}
+			logInstance.ErrorLogger.Error("Failed to find user with login", "login", destination)
+			return
 		} else {
-			log.Fatalf("Failed to query user: %v", err)
+			logInstance.ErrorLogger.Error("Failed to query user", "error", err)
+			return
 		}
 	}
 
-	// Insert the message into the sms_messages table
 	_, err = db.Exec(
-		"INSERT INTO sms_messages (dt, msg, client) VALUES (?, ?, ?)",
-		time.Now(), text, source,
+		"INSERT INTO sms_messages (dt, msg, client, user_id) VALUES (?, ?, ?, ?)",
+		time.Now(), text, source, userID,
 	)
 	if err != nil {
-		log.Fatalf("Failed to insert message into sms_messages table: %v", err)
+		logInstance.ErrorLogger.Error("Failed to insert message into sms_messages table", "error", err)
+		return
 	}
 
-	log.Printf("Message recorded in database: src=%s, dst=%s, txt=%s", source, destination, text)
+	logInstance.InfoLogger.Info("Message recorded in database", "src", source, "dst", destination, "txt", text)
 }
