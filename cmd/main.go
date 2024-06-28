@@ -29,7 +29,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logInstance.InfoLogger.Info("Server is up and running")
+	slog.Info("Server is up and running")
 
 	rabbitMQConn, err = amqp.Dial(cfg.RabbitMQ.URL)
 	if err != nil {
@@ -87,12 +87,12 @@ func consumeMessages() {
 
 	go func() {
 		for d := range msgs {
-			logInstance.InfoLogger.Info("Received a message", "message", string(d.Body))
+			slog.Info("Received a message", "message", string(d.Body))
 			processMessage(d.Body)
 		}
 	}()
 
-	logInstance.InfoLogger.Info("Waiting for messages. To exit press CTRL+C")
+	slog.Info("Waiting for messages. To exit press CTRL+C")
 	<-forever
 }
 
@@ -145,5 +145,5 @@ func processMessage(body []byte) {
 		return
 	}
 
-	logInstance.InfoLogger.Info("Message recorded in database", "src", source, "dst", destination, "txt", text)
+	slog.Info("Message recorded in database", "src", source, "dst", destination, "txt", text)
 }
