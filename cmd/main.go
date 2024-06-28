@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"log"
 	"log/slog"
 	"os"
 	"rabbitmq-consumer/config"
@@ -29,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Server is up and running")
+	log.Println("Server is up and running")
 
 	rabbitMQConn, err = amqp.Dial(cfg.RabbitMQ.URL)
 	if err != nil {
@@ -56,6 +57,20 @@ func consumeMessages() {
 	}
 	defer channel.Close()
 
+	err = channel.ExchangeDeclare(
+		"extra.turkmentv", // name
+		"direct",          // type
+		true,              // durable
+		false,             // auto-deleted
+		false,             // internal
+		false,             // no-wait
+		nil,               // arguments
+	)
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to declare an exchange", "error", err)
+		return
+	}
+
 	queue, err := channel.QueueDeclare(
 		"extra.turkmentv", // name of the queue
 		true,              // durable
@@ -66,6 +81,18 @@ func consumeMessages() {
 	)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to declare a queue", "error", err)
+		return
+	}
+
+	err = channel.QueueBind(
+		queue.Name,        // queue name
+		"",                // routing key
+		"extra.turkmentv", // exchange
+		false,
+		nil,
+	)
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to bind queue to exchange", "error", err)
 		return
 	}
 
@@ -87,12 +114,11 @@ func consumeMessages() {
 
 	go func() {
 		for d := range msgs {
-			slog.Info("Received a message", "message", string(d.Body))
+			log.Printf("Received a message: %v", string(d.Body))
 			processMessage(d.Body)
 		}
 	}()
 
-	slog.Info("Waiting for messages. To exit press CTRL+C")
 	<-forever
 }
 
@@ -145,5 +171,5 @@ func processMessage(body []byte) {
 		return
 	}
 
-	slog.Info("Message recorded in database", "src", source, "dst", destination, "txt", text)
+	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v", source, destination, text)
 }
