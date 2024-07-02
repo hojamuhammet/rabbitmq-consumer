@@ -121,17 +121,16 @@ func consumeMessages() {
 
 	<-forever
 }
-
 func processMessage(body []byte) {
 	message := string(body)
 
 	parts := strings.Split(message, ", ")
-	if len(parts) < 3 {
+	if len(parts) < 4 { // Ensure there are at least 4 parts: src, dst, txt, date
 		logInstance.ErrorLogger.Error("Failed to parse message: input does not match format", "message", message)
 		return
 	}
 
-	var source, destination, text string
+	var source, destination, text, date string
 	for _, part := range parts {
 		switch {
 		case strings.HasPrefix(part, "src="):
@@ -144,10 +143,17 @@ func processMessage(body []byte) {
 				text += ", "
 			}
 			text += textPart
+		case strings.HasPrefix(part, "date="):
+			date = strings.TrimPrefix(part, "date=")
 		default:
 			logInstance.ErrorLogger.Error("Failed to parse message: unrecognized part format", "part", part)
 			return
 		}
+	}
+
+	if date == "" {
+		logInstance.ErrorLogger.Error("Failed to parse message: date is missing", "message", message)
+		return
 	}
 
 	var userID int64
@@ -162,14 +168,20 @@ func processMessage(body []byte) {
 		}
 	}
 
+	parsedDate, err := time.Parse(time.RFC3339, date)
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to parse date", "date", date, "error", err)
+		return
+	}
+
 	_, err = db.Exec(
 		"INSERT INTO sms_messages (dt, msg, client, user_id) VALUES (?, ?, ?, ?)",
-		time.Now(), text, source, userID,
+		parsedDate, text, source, userID,
 	)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to insert message into sms_messages table", "error", err)
 		return
 	}
 
-	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v", source, destination, text)
+	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v", source, destination, text, parsedDate)
 }
