@@ -173,6 +173,26 @@ func processMessage(body []byte) {
 		}
 	}
 
+	var clientID int64
+	err = db.QueryRow("SELECT id FROM clients WHERE phone = ?", source).Scan(&clientID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			res, err := db.Exec("INSERT INTO clients (phone) VALUES (?)", source)
+			if err != nil {
+				logInstance.ErrorLogger.Error("Failed to insert client into clients table", "error", err)
+				return
+			}
+			clientID, err = res.LastInsertId()
+			if err != nil {
+				logInstance.ErrorLogger.Error("Failed to get last insert id for clients", "error", err)
+				return
+			}
+		} else {
+			logInstance.ErrorLogger.Error("Failed to query client", "error", err)
+			return
+		}
+	}
+
 	parsedDate, err := time.Parse("2006-01-02T15:04:05", date)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to parse date", "date", date, "error", err)
@@ -180,8 +200,8 @@ func processMessage(body []byte) {
 	}
 
 	_, err = db.Exec(
-		"INSERT INTO sms_messages (dt, msg, client, user_id, parts) VALUES (?, ?, ?, ?, ?)",
-		parsedDate, text, source, userID, partsCount,
+		"INSERT INTO sms_messages (dt, msg, client_id, user_id, parts) VALUES (?, ?, ?, ?, ?)",
+		parsedDate, text, clientID, userID, partsCount,
 	)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to insert message into sms_messages table", "error", err)
