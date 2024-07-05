@@ -7,6 +7,7 @@ import (
 	"os"
 	"rabbitmq-consumer/config"
 	"rabbitmq-consumer/pkg/logger"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,12 +127,13 @@ func processMessage(body []byte) {
 	message := string(body)
 
 	parts := strings.Split(message, ", ")
-	if len(parts) < 4 { // Ensure there are at least 4 parts: src, dst, txt, date
+	if len(parts) < 5 { // Ensure there are at least 5 parts: src, dst, txt, date, parts
 		logInstance.ErrorLogger.Error("Failed to parse message: input does not match format", "message", message)
 		return
 	}
 
 	var source, destination, text, date string
+	var partsCount int
 	for _, part := range parts {
 		switch {
 		case strings.HasPrefix(part, "src="):
@@ -146,6 +148,8 @@ func processMessage(body []byte) {
 			text += textPart
 		case strings.HasPrefix(part, "date="):
 			date = strings.TrimPrefix(part, "date=")
+		case strings.HasPrefix(part, "parts="):
+			partsCount = parsePartsCount(strings.TrimPrefix(part, "parts="))
 		default:
 			logInstance.ErrorLogger.Error("Failed to parse message: unrecognized part format", "part", part)
 			return
@@ -176,13 +180,22 @@ func processMessage(body []byte) {
 	}
 
 	_, err = db.Exec(
-		"INSERT INTO sms_messages (dt, msg, client, user_id) VALUES (?, ?, ?, ?)",
-		parsedDate, text, source, userID,
+		"INSERT INTO sms_messages (dt, msg, client, user_id, parts) VALUES (?, ?, ?, ?, ?)",
+		parsedDate, text, source, userID, partsCount,
 	)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to insert message into sms_messages table", "error", err)
 		return
 	}
 
-	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v", source, destination, text, parsedDate)
+	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v, parts: %v", source, destination, text, parsedDate, partsCount)
+}
+
+func parsePartsCount(partsStr string) int {
+	partsCount, err := strconv.Atoi(partsStr)
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to parse parts count", "parts", partsStr, "error", err)
+		return 1 // Default to 1 if parsing fails
+	}
+	return partsCount
 }
