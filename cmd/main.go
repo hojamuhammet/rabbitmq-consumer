@@ -121,6 +121,7 @@ func consumeMessages() {
 
 	<-forever
 }
+
 func processMessage(body []byte) {
 	message := string(body)
 
@@ -168,7 +169,7 @@ func processMessage(body []byte) {
 		}
 	}
 
-	parsedDate, err := time.Parse(time.RFC3339, date)
+	parsedDate, err := time.Parse("2006-01-02T15:04:05", date)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to parse date", "date", date, "error", err)
 		return
