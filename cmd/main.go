@@ -2,13 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"log/slog"
 	"os"
 	"rabbitmq-consumer/config"
 	"rabbitmq-consumer/pkg/logger"
-	"strconv"
-	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -20,6 +19,14 @@ var (
 	logInstance  *logger.Loggers
 	db           *sql.DB
 )
+
+type SMSMessage struct {
+	Source      string `json:"src"`
+	Destination string `json:"dst"`
+	Text        string `json:"txt"`
+	Date        string `json:"date"`
+	Parts       int    `json:"parts"`
+}
 
 func main() {
 	cfg := config.LoadConfig()
@@ -124,48 +131,25 @@ func consumeMessages() {
 }
 
 func processMessage(body []byte) {
-	message := string(body)
-
-	parts := strings.Split(message, ", ")
-	if len(parts) < 5 { // Ensure there are at least 5 parts: src, dst, txt, date, parts
-		logInstance.ErrorLogger.Error("Failed to parse message: input does not match format", "message", message)
+	var msg SMSMessage
+	err := json.Unmarshal(body, &msg)
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to unmarshal message", "error", err)
 		return
 	}
 
-	var source, destination, text, date string
-	var partsCount int
-	for _, part := range parts {
-		switch {
-		case strings.HasPrefix(part, "src="):
-			source = strings.TrimPrefix(part, "src=")
-		case strings.HasPrefix(part, "dst="):
-			destination = strings.TrimPrefix(part, "dst=")
-		case strings.HasPrefix(part, "txt="):
-			textPart := strings.TrimPrefix(part, "txt=")
-			if text != "" {
-				text += ", "
-			}
-			text += textPart
-		case strings.HasPrefix(part, "date="):
-			date = strings.TrimPrefix(part, "date=")
-		case strings.HasPrefix(part, "parts="):
-			partsCount = parsePartsCount(strings.TrimPrefix(part, "parts="))
-		default:
-			logInstance.ErrorLogger.Error("Failed to parse message: unrecognized part format", "part", part)
-			return
-		}
-	}
+	log.Printf("Processing message: %+v", msg)
 
-	if date == "" {
-		logInstance.ErrorLogger.Error("Failed to parse message: date is missing", "message", message)
+	if msg.Date == "" {
+		logInstance.ErrorLogger.Error("Failed to parse message: date is missing", "message", string(body))
 		return
 	}
 
 	var userID int64
-	err := db.QueryRow("SELECT id FROM users WHERE login = ?", destination).Scan(&userID)
+	err = db.QueryRow("SELECT id FROM users WHERE login = ?", msg.Destination).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			logInstance.ErrorLogger.Error("Failed to find user with login", "login", destination)
+			logInstance.ErrorLogger.Error("Failed to find user with login", "login", msg.Destination)
 			return
 		} else {
 			logInstance.ErrorLogger.Error("Failed to query user", "error", err)
@@ -174,10 +158,10 @@ func processMessage(body []byte) {
 	}
 
 	var clientID int64
-	err = db.QueryRow("SELECT id FROM clients WHERE phone = ?", source).Scan(&clientID)
+	err = db.QueryRow("SELECT id FROM clients WHERE phone = ?", msg.Source).Scan(&clientID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			res, err := db.Exec("INSERT INTO clients (phone) VALUES (?)", source)
+			res, err := db.Exec("INSERT INTO clients (phone) VALUES (?)", msg.Source)
 			if err != nil {
 				logInstance.ErrorLogger.Error("Failed to insert client into clients table", "error", err)
 				return
@@ -193,29 +177,21 @@ func processMessage(body []byte) {
 		}
 	}
 
-	parsedDate, err := time.Parse("2006-01-02T15:04:05", date)
+	parsedDate, err := time.Parse("2006-01-02T15:04:05", msg.Date)
 	if err != nil {
-		logInstance.ErrorLogger.Error("Failed to parse date", "date", date, "error", err)
+		logInstance.ErrorLogger.Error("Failed to parse date", "date", msg.Date, "error", err)
 		return
 	}
 
 	_, err = db.Exec(
 		"INSERT INTO sms_messages (dt, msg, client_id, user_id, parts) VALUES (?, ?, ?, ?, ?)",
-		parsedDate, text, clientID, userID, partsCount,
+		parsedDate, msg.Text, clientID, userID, msg.Parts,
 	)
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to insert message into sms_messages table", "error", err)
+		log.Printf("INSERT INTO sms_messages (dt, msg, client_id, user_id, parts) VALUES (%v, %v, %v, %v, %v)", parsedDate, msg.Text, clientID, userID, msg.Parts)
 		return
 	}
 
-	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v, parts: %v", source, destination, text, parsedDate, partsCount)
-}
-
-func parsePartsCount(partsStr string) int {
-	partsCount, err := strconv.Atoi(partsStr)
-	if err != nil {
-		logInstance.ErrorLogger.Error("Failed to parse parts count", "parts", partsStr, "error", err)
-		return 1 // Default to 1 if parsing fails
-	}
-	return partsCount
+	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v, parts: %v", msg.Source, msg.Destination, msg.Text, parsedDate, msg.Parts)
 }
