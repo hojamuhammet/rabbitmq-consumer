@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	rabbitMQConn *amqp.Connection
+	rabbitMQConn *AMQPConnection
 	logInstance  *logger.Loggers
 	db           *sql.DB
 )
@@ -26,6 +26,80 @@ type SMSMessage struct {
 	Text        string `json:"txt"`
 	Date        string `json:"date"`
 	Parts       int    `json:"parts"`
+}
+
+type AMQPConnection struct {
+	conn            *amqp.Connection
+	channel         *amqp.Channel
+	notifyConnClose chan *amqp.Error
+	notifyChanClose chan *amqp.Error
+	done            chan bool
+	url             string
+}
+
+func NewAMQPConnection(url string) *AMQPConnection {
+	return &AMQPConnection{
+		url:  url,
+		done: make(chan bool),
+	}
+}
+
+func (c *AMQPConnection) Connect() error {
+	var err error
+
+	c.conn, err = amqp.Dial(c.url)
+	if err != nil {
+		return err
+	}
+
+	c.channel, err = c.conn.Channel()
+	if err != nil {
+		return err
+	}
+
+	c.notifyConnClose = c.conn.NotifyClose(make(chan *amqp.Error))
+	c.notifyChanClose = c.channel.NotifyClose(make(chan *amqp.Error))
+
+	go c.handleReconnection()
+
+	return nil
+}
+
+func (c *AMQPConnection) handleReconnection() {
+	for {
+		select {
+		case <-c.notifyConnClose:
+			log.Println("Connection closed. Reconnecting...")
+			c.reconnect()
+		case <-c.notifyChanClose:
+			log.Println("Channel closed. Reconnecting...")
+			c.reconnect()
+		case <-c.done:
+			return
+		}
+	}
+}
+
+func (c *AMQPConnection) reconnect() {
+	for {
+		err := c.Connect()
+		if err == nil {
+			log.Println("Reconnected to RabbitMQ")
+			consumeMessages() // Restart message consumption
+			return
+		}
+
+		log.Printf("Failed to reconnect: %v. Retrying in %v...", err, 5*time.Second)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func (c *AMQPConnection) Close() {
+	c.done <- true
+	if !c.conn.IsClosed() {
+		c.channel.Close()
+		c.conn.Close()
+	}
 }
 
 func main() {
@@ -40,7 +114,8 @@ func main() {
 
 	log.Println("Server is up and running")
 
-	rabbitMQConn, err = amqp.Dial(cfg.RabbitMQ.URL)
+	rabbitMQConn = NewAMQPConnection(cfg.RabbitMQ.URL)
+	err = rabbitMQConn.Connect()
 	if err != nil {
 		logInstance.ErrorLogger.Error("Failed to connect to RabbitMQ", "error", err)
 		os.Exit(1)
@@ -58,14 +133,9 @@ func main() {
 }
 
 func consumeMessages() {
-	channel, err := rabbitMQConn.Channel()
-	if err != nil {
-		logInstance.ErrorLogger.Error("Failed to open a channel", "error", err)
-		return
-	}
-	defer channel.Close()
+	channel := rabbitMQConn.channel
 
-	err = channel.ExchangeDeclare(
+	err := channel.ExchangeDeclare(
 		"extra.turkmentv", // name
 		"direct",          // type
 		true,              // durable
