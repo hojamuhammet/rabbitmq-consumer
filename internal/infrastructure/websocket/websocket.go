@@ -17,13 +17,16 @@ type WebSocketServer struct {
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
-	broadcast  chan Message
+	broadcast  chan SMSMessage
 	mu         sync.Mutex
 }
 
-type Message struct {
-	Dst string `json:"dst"`
-	Msg string `json:"msg"`
+type SMSMessage struct {
+	Source      string `json:"src"`
+	Destination string `json:"dst"`
+	Text        string `json:"txt"`
+	Date        string `json:"date"`
+	Parts       int    `json:"parts"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -37,7 +40,7 @@ func NewWebSocketServer() *WebSocketServer {
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		broadcast:  make(chan Message),
+		broadcast:  make(chan SMSMessage),
 	}
 }
 
@@ -58,7 +61,7 @@ func (server *WebSocketServer) Run() {
 		case message := <-server.broadcast:
 			server.mu.Lock()
 			for client := range server.clients {
-				if client.Dst == message.Dst {
+				if client.Dst == message.Destination {
 					err := client.Conn.WriteJSON(message)
 					if err != nil {
 						client.Conn.Close()
@@ -97,16 +100,16 @@ func (server *WebSocketServer) handleMessages(client *Client) {
 	}()
 
 	for {
-		var msg Message
+		var msg SMSMessage
 		err := client.Conn.ReadJSON(&msg)
 		if err != nil {
 			log.Printf("Error reading JSON: %v", err)
 			return
 		}
-		server.broadcast <- msg
+		server.BroadcastMessage(msg)
 	}
 }
 
-func (server *WebSocketServer) BroadcastMessage(message Message) {
+func (server *WebSocketServer) BroadcastMessage(message SMSMessage) {
 	server.broadcast <- message
 }

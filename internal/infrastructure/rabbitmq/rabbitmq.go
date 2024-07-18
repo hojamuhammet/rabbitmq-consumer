@@ -155,7 +155,7 @@ func (c *AMQPConnection) ConsumeMessages() {
 				continue
 			}
 
-			var msg websocket.Message
+			var msg websocket.SMSMessage
 			if err := json.Unmarshal(d.Body, &msg); err != nil {
 				c.logInstance.ErrorLogger.Error("Failed to unmarshal message for WebSocket", "error", err)
 				continue
