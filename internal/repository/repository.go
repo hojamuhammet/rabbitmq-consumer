@@ -2,7 +2,6 @@ package repository
 
 import (
 	"database/sql"
-	"log"
 	"log/slog"
 	"rabbitmq-consumer/internal/domain"
 	"time"
@@ -29,10 +28,8 @@ func (r *smsRepository) FindUserID(destination string) (int64, error) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			r.logger.Error("Failed to find user with login", slog.String("login", destination))
-			log.Printf("Failed to find user with login: %s", destination) // Log to console
 		} else {
 			r.logger.Error("Failed to query user", slog.Any("error", err))
-			log.Printf("Failed to query user: %v", err) // Log to console
 		}
 		return 0, err
 	}
@@ -47,18 +44,15 @@ func (r *smsRepository) FindOrCreateClientID(source string) (int64, error) {
 			res, err := r.db.Exec("INSERT INTO clients (phone) VALUES (?)", source)
 			if err != nil {
 				r.logger.Error("Failed to insert client into clients table", slog.Any("error", err))
-				log.Printf("Failed to insert client into clients table: %v", err) // Log to console
 				return 0, err
 			}
 			clientID, err = res.LastInsertId()
 			if err != nil {
 				r.logger.Error("Failed to get last insert id for clients", slog.Any("error", err))
-				log.Printf("Failed to get last insert id for clients: %v", err) // Log to console
 				return 0, err
 			}
 		} else {
 			r.logger.Error("Failed to query client", slog.Any("error", err))
-			log.Printf("Failed to query client: %v", err) // Log to console
 			return 0, err
 		}
 	}
@@ -69,7 +63,6 @@ func (r *smsRepository) InsertMessage(msg domain.SMSMessage, clientID, userID in
 	parsedDate, err := time.Parse("2006-01-02T15:04:05", msg.Date)
 	if err != nil {
 		r.logger.Error("Failed to parse date", slog.String("date", msg.Date), slog.Any("error", err))
-		log.Printf("Failed to parse date: %s, error: %v", msg.Date, err) // Log to console
 		return err
 	}
 
@@ -79,7 +72,6 @@ func (r *smsRepository) InsertMessage(msg domain.SMSMessage, clientID, userID in
 	)
 	if err != nil {
 		r.logger.Error("Failed to insert message into sms_messages table", slog.Any("error", err))
-		log.Printf("Failed to insert message into sms_messages table: %v", err) // Log to console
 		return err
 	}
 

@@ -2,13 +2,12 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"rabbitmq-consumer/config"
+	"rabbitmq-consumer/internal/delivery/websocket"
 	"rabbitmq-consumer/internal/infrastructure/rabbitmq"
-	"rabbitmq-consumer/internal/infrastructure/websocket"
 	"rabbitmq-consumer/internal/repository"
 	"rabbitmq-consumer/internal/service"
 	"rabbitmq-consumer/pkg/logger"
@@ -23,7 +22,6 @@ func main() {
 
 	logInstance, err := logger.SetupLogger(cfg.Env)
 	if err != nil {
-		log.Printf("Failed to set up logger: %v", err)
 		os.Exit(1)
 	}
 
@@ -39,9 +37,9 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	repo := repository.NewSMSRepository(db, logInstance.ErrorLogger)
-	smsService := service.NewSMSService(repo, logInstance)
-
 	webSocketServer := websocket.NewWebSocketServer()
+	smsService := service.NewSMSService(repo, logInstance, webSocketServer)
+
 	go webSocketServer.Run()
 
 	rabbitMQConn := rabbitmq.NewAMQPConnection(cfg, smsService, logInstance, webSocketServer)
@@ -52,23 +50,47 @@ func main() {
 	}
 	defer rabbitMQConn.Close()
 
+	msgs, err := rabbitMQConn.ConsumeMessages()
+	if err != nil {
+		logInstance.ErrorLogger.Error("Failed to start consuming messages", "error", err)
+		os.Exit(1)
+	}
+
+	go smsService.HandleMessages(msgs)
+
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: http.DefaultServeMux,
+	}
+
 	http.HandleFunc("/ws", webSocketServer.HandleWebSocket)
 	go func() {
-		log.Printf("WebSocket server started at :8080")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
-			log.Fatalf("Failed to start WebSocket server: %v", err)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logInstance.ErrorLogger.Error("Failed to start WebSocket server", "error", err)
 		}
 	}()
-
-	go rabbitMQConn.ConsumeMessages()
 
 	// Graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	<-sigChan
-
 	logInstance.InfoLogger.Info("Shutting down gracefully...")
+
+	// Close RabbitMQ connection
 	rabbitMQConn.Close()
-	logInstance.InfoLogger.Info("RabbitMQ connection closed. Exiting...")
+	logInstance.InfoLogger.Info("RabbitMQ connection closed.")
+
+	// Shut down WebSocket server
+	if err := server.Close(); err != nil {
+		logInstance.ErrorLogger.Error("Failed to close WebSocket server", "error", err)
+	} else {
+		logInstance.InfoLogger.Info("WebSocket server closed.")
+	}
+
+	// Allow some time for connections to close gracefully
+	time.Sleep(1 * time.Second)
+
+	logInstance.InfoLogger.Info("Exiting...")
+	os.Exit(0)
 }

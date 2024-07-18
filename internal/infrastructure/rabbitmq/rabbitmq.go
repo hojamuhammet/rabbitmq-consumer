@@ -1,10 +1,8 @@
 package rabbitmq
 
 import (
-	"encoding/json"
-	"log"
 	"rabbitmq-consumer/config"
-	"rabbitmq-consumer/internal/infrastructure/websocket"
+	"rabbitmq-consumer/internal/delivery/websocket"
 	"rabbitmq-consumer/internal/service"
 	"rabbitmq-consumer/pkg/logger"
 	"time"
@@ -59,10 +57,8 @@ func (c *AMQPConnection) handleReconnection() {
 	for {
 		select {
 		case <-c.notifyConnClose:
-			log.Println("Connection closed. Reconnecting...")
 			c.reconnect()
 		case <-c.notifyChanClose:
-			log.Println("Channel closed. Reconnecting...")
 			c.reconnect()
 		case <-c.done:
 			return
@@ -74,12 +70,9 @@ func (c *AMQPConnection) reconnect() {
 	for {
 		err := c.Connect()
 		if err == nil {
-			log.Println("Reconnected to RabbitMQ")
 			c.ConsumeMessages()
 			return
 		}
-
-		log.Printf("Failed to reconnect: %v. Retrying in %v...", err, 5*time.Second)
 		time.Sleep(5 * time.Second)
 	}
 }
@@ -92,7 +85,7 @@ func (c *AMQPConnection) Close() {
 	}
 }
 
-func (c *AMQPConnection) ConsumeMessages() {
+func (c *AMQPConnection) ConsumeMessages() (<-chan amqp.Delivery, error) {
 	err := c.channel.ExchangeDeclare(
 		"extra.turkmentv", // name
 		"direct",          // type
@@ -104,7 +97,7 @@ func (c *AMQPConnection) ConsumeMessages() {
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to declare an exchange", "error", err)
-		return
+		return nil, err
 	}
 
 	queue, err := c.channel.QueueDeclare(
@@ -117,7 +110,7 @@ func (c *AMQPConnection) ConsumeMessages() {
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to declare a queue", "error", err)
-		return
+		return nil, err
 	}
 
 	err = c.channel.QueueBind(
@@ -129,7 +122,7 @@ func (c *AMQPConnection) ConsumeMessages() {
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to bind queue to exchange", "error", err)
-		return
+		return nil, err
 	}
 
 	msgs, err := c.channel.Consume(
@@ -143,24 +136,8 @@ func (c *AMQPConnection) ConsumeMessages() {
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to register a consumer", "error", err)
-		return
+		return nil, err
 	}
 
-	go func() {
-		for d := range msgs {
-			log.Printf("Received a message: %v", string(d.Body))
-			err := c.smsService.ProcessMessage(d.Body)
-			if err != nil {
-				c.logInstance.ErrorLogger.Error("Failed to process message", "error", err)
-				continue
-			}
-
-			var msg websocket.SMSMessage
-			if err := json.Unmarshal(d.Body, &msg); err != nil {
-				c.logInstance.ErrorLogger.Error("Failed to unmarshal message for WebSocket", "error", err)
-				continue
-			}
-			c.wsServer.BroadcastMessage(msg)
-		}
-	}()
+	return msgs, nil
 }

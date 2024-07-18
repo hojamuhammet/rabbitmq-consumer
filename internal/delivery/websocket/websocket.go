@@ -3,6 +3,7 @@ package websocket
 import (
 	"log"
 	"net/http"
+	"rabbitmq-consumer/internal/domain"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -17,16 +18,8 @@ type WebSocketServer struct {
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
-	broadcast  chan SMSMessage
+	broadcast  chan domain.SMSMessage
 	mu         sync.Mutex
-}
-
-type SMSMessage struct {
-	Source      string `json:"src"`
-	Destination string `json:"dst"`
-	Text        string `json:"txt"`
-	Date        string `json:"date"`
-	Parts       int    `json:"parts"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -40,7 +33,7 @@ func NewWebSocketServer() *WebSocketServer {
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		broadcast:  make(chan SMSMessage),
+		broadcast:  make(chan domain.SMSMessage),
 	}
 }
 
@@ -83,7 +76,6 @@ func (server *WebSocketServer) HandleWebSocket(w http.ResponseWriter, r *http.Re
 
 	dst := r.URL.Query().Get("dst")
 	if dst == "" {
-		log.Printf("Missing 'dst' query parameter")
 		conn.Close()
 		return
 	}
@@ -100,16 +92,15 @@ func (server *WebSocketServer) handleMessages(client *Client) {
 	}()
 
 	for {
-		var msg SMSMessage
+		var msg domain.SMSMessage
 		err := client.Conn.ReadJSON(&msg)
 		if err != nil {
-			log.Printf("Error reading JSON: %v", err)
 			return
 		}
 		server.BroadcastMessage(msg)
 	}
 }
 
-func (server *WebSocketServer) BroadcastMessage(message SMSMessage) {
+func (server *WebSocketServer) BroadcastMessage(message domain.SMSMessage) {
 	server.broadcast <- message
 }

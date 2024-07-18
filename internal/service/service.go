@@ -2,54 +2,56 @@ package service
 
 import (
 	"encoding/json"
-	"log"
 	"log/slog"
+	"rabbitmq-consumer/internal/delivery/websocket"
 	"rabbitmq-consumer/internal/domain"
 	"rabbitmq-consumer/internal/repository"
 	"rabbitmq-consumer/pkg/logger"
+
+	"github.com/streadway/amqp"
 )
 
 type SMSService interface {
-	ProcessMessage(body []byte) error
+	ProcessMessage(body []byte) (domain.SMSMessage, error)
+	HandleMessages(msgs <-chan amqp.Delivery)
 }
 
 type smsService struct {
-	repo   repository.SMSRepository
-	logger *logger.Loggers
+	repo     repository.SMSRepository
+	logger   *logger.Loggers
+	wsServer *websocket.WebSocketServer
 }
 
-func NewSMSService(repo repository.SMSRepository, logger *logger.Loggers) SMSService {
-	return &smsService{repo: repo, logger: logger}
+func NewSMSService(repo repository.SMSRepository, logger *logger.Loggers, wsServer *websocket.WebSocketServer) SMSService {
+	return &smsService{repo: repo, logger: logger, wsServer: wsServer}
 }
 
-func (s *smsService) ProcessMessage(body []byte) error {
+func (s *smsService) ProcessMessage(body []byte) (domain.SMSMessage, error) {
 	var msg domain.SMSMessage
 	err := json.Unmarshal(body, &msg)
 	if err != nil {
 		s.logger.ErrorLogger.Error("Failed to unmarshal message", slog.Any("error", err))
-		log.Printf("Failed to unmarshal message: %v", err) // Log to console
-		return err
+		return domain.SMSMessage{}, err
 	}
 
 	if msg.Date == "" {
 		s.logger.ErrorLogger.Error("Failed to parse message: date is missing", slog.String("message", string(body)))
-		log.Printf("Failed to parse message: date is missing, message: %s", string(body)) // Log to console
-		return err
+		return domain.SMSMessage{}, err
 	}
 
 	userID, err := s.repo.FindUserID(msg.Destination)
 	if err != nil {
-		return err
+		return domain.SMSMessage{}, err
 	}
 
 	clientID, err := s.repo.FindOrCreateClientID(msg.Source)
 	if err != nil {
-		return err
+		return domain.SMSMessage{}, err
 	}
 
 	err = s.repo.InsertMessage(msg, clientID, userID)
 	if err != nil {
-		return err
+		return domain.SMSMessage{}, err
 	}
 
 	s.logger.InfoLogger.Info("Message recorded in database",
@@ -59,7 +61,16 @@ func (s *smsService) ProcessMessage(body []byte) error {
 		slog.String("date", msg.Date),
 		slog.Int("parts", msg.Parts),
 	)
-	log.Printf("Message recorded in database: src: %v, dst: %v, txt: %v, date: %v, parts: %v",
-		msg.Source, msg.Destination, msg.Text, msg.Date, msg.Parts) // Log to console
-	return nil
+
+	return msg, nil
+}
+
+func (s *smsService) HandleMessages(msgs <-chan amqp.Delivery) {
+	for d := range msgs {
+		msg, err := s.ProcessMessage(d.Body)
+		if err != nil {
+			continue
+		}
+		s.wsServer.BroadcastMessage(msg)
+	}
 }
