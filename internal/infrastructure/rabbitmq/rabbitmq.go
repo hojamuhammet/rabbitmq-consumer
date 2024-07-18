@@ -1,8 +1,10 @@
 package rabbitmq
 
 import (
+	"encoding/json"
 	"log"
 	"rabbitmq-consumer/config"
+	"rabbitmq-consumer/internal/infrastructure/websocket"
 	"rabbitmq-consumer/internal/service"
 	"rabbitmq-consumer/pkg/logger"
 	"time"
@@ -19,14 +21,16 @@ type AMQPConnection struct {
 	url             string
 	smsService      service.SMSService
 	logInstance     *logger.Loggers
+	wsServer        *websocket.WebSocketServer
 }
 
-func NewAMQPConnection(cfg *config.Config, smsService service.SMSService, logInstance *logger.Loggers) *AMQPConnection {
+func NewAMQPConnection(cfg *config.Config, smsService service.SMSService, logInstance *logger.Loggers, wsServer *websocket.WebSocketServer) *AMQPConnection {
 	return &AMQPConnection{
 		url:         cfg.RabbitMQ.URL,
 		done:        make(chan bool),
 		smsService:  smsService,
 		logInstance: logInstance,
+		wsServer:    wsServer,
 	}
 }
 
@@ -148,7 +152,15 @@ func (c *AMQPConnection) ConsumeMessages() {
 			err := c.smsService.ProcessMessage(d.Body)
 			if err != nil {
 				c.logInstance.ErrorLogger.Error("Failed to process message", "error", err)
+				continue
 			}
+
+			var msg websocket.Message
+			if err := json.Unmarshal(d.Body, &msg); err != nil {
+				c.logInstance.ErrorLogger.Error("Failed to unmarshal message for WebSocket", "error", err)
+				continue
+			}
+			c.wsServer.BroadcastMessage(msg)
 		}
 	}()
 }

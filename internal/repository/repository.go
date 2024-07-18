@@ -74,8 +74,8 @@ func (r *smsRepository) InsertMessage(msg domain.SMSMessage, clientID, userID in
 	}
 
 	_, err = r.db.Exec(
-		"INSERT INTO sms_messages (dt, msg, client_id, user_id, parts) VALUES (?, ?, ?, ?, ?)",
-		parsedDate, msg.Text, clientID, userID, msg.Parts,
+		"INSERT INTO sms_messages (dt, msg, client_relation_id, user_id, parts, client) VALUES (?, ?, ?, ?, ?, ?)",
+		parsedDate, msg.Text, clientID, userID, msg.Parts, msg.Source,
 	)
 	if err != nil {
 		r.logger.Error("Failed to insert message into sms_messages table", slog.Any("error", err))
