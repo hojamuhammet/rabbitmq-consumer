@@ -77,18 +77,15 @@ func main() {
 	<-sigChan
 	logInstance.InfoLogger.Info("Shutting down gracefully...")
 
-	// Close RabbitMQ connection
 	rabbitMQConn.Close()
 	logInstance.InfoLogger.Info("RabbitMQ connection closed.")
 
-	// Shut down WebSocket server
 	if err := server.Close(); err != nil {
 		logInstance.ErrorLogger.Error("Failed to close WebSocket server", "error", err)
 	} else {
 		logInstance.InfoLogger.Info("WebSocket server closed.")
 	}
 
-	// Allow some time for connections to close gracefully
 	time.Sleep(1 * time.Second)
 
 	logInstance.InfoLogger.Info("Exiting...")
