@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"rabbitmq-consumer/config"
 	"rabbitmq-consumer/internal/delivery/websocket"
-	"rabbitmq-consumer/internal/infrastructure/rabbitmq"
+	rabbitmq "rabbitmq-consumer/internal/infrastructure"
 	"rabbitmq-consumer/internal/repository"
 	"rabbitmq-consumer/internal/service"
 	"rabbitmq-consumer/pkg/logger"
