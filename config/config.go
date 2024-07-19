@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	Env      string   `yaml:"env"`
-	Database Database `yaml:"database"`
-	RabbitMQ RabbitMQ `yaml:"rabbitmq"`
+	Env       string    `yaml:"env"`
+	Database  Database  `yaml:"database"`
+	RabbitMQ  RabbitMQ  `yaml:"rabbitmq"`
+	WebSocket WebSocket `yaml:"websocket"`
 }
 
 type Database struct {
@@ -20,6 +21,10 @@ type Database struct {
 
 type RabbitMQ struct {
 	URL string `yaml:"url"`
+}
+
+type WebSocket struct {
+	Addr string `yaml:"address"`
 }
 
 func LoadConfig() *Config {

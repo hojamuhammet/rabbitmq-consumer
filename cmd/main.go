@@ -59,11 +59,11 @@ func main() {
 	go smsService.HandleMessages(msgs)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.WebSocket.Addr,
 		Handler: http.DefaultServeMux,
 	}
 
-	http.HandleFunc("/ws", webSocketServer.HandleWebSocket)
+	http.HandleFunc("/msg-ws", webSocketServer.HandleWebSocket)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logInstance.ErrorLogger.Error("Failed to start WebSocket server", "error", err)
