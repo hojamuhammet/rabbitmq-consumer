@@ -3,8 +3,6 @@ package config
 import (
 	"log"
 
-	"rabbitmq-consumer/pkg/utils"
-
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
@@ -20,7 +18,14 @@ type Database struct {
 }
 
 type RabbitMQ struct {
-	URL string `yaml:"url"`
+	URL      string      `yaml:"url"`
+	Consumer ConsumerKey `yaml:"consumer"`
+}
+
+type ConsumerKey struct {
+	ExchangeName string `yaml:"exchange_name"`
+	QueueName    string `yaml:"queue_name"`
+	RoutingKey   string `yaml:"routing_key"`
 }
 
 type WebSocket struct {
@@ -37,7 +42,7 @@ func LoadConfig() *Config {
 	var cfg Config
 
 	if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
-		log.Fatalf("Cannot read config: %v", utils.Err(err))
+		log.Fatalf("Cannot read config: %v", err)
 	}
 
 	return &cfg

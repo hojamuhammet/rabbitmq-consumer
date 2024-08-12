@@ -66,11 +66,28 @@ func (s *smsService) ProcessMessage(body []byte) (domain.SMSMessage, error) {
 }
 
 func (s *smsService) HandleMessages(msgs <-chan amqp.Delivery) {
+	s.logger.InfoLogger.Info("Starting to handle messages...")
+
 	for d := range msgs {
+		// Log the received message body
+		s.logger.InfoLogger.Info("Received a message", slog.String("message_body", string(d.Body)))
+
 		msg, err := s.ProcessMessage(d.Body)
 		if err != nil {
+			s.logger.ErrorLogger.Error("Failed to process message", slog.Any("error", err))
 			continue
 		}
+
+		s.logger.InfoLogger.Info("Successfully processed message",
+			slog.String("src", msg.Source),
+			slog.String("dst", msg.Destination),
+			slog.String("txt", msg.Text),
+			slog.String("date", msg.Date),
+			slog.Int("parts", msg.Parts),
+		)
+
 		s.wsServer.BroadcastMessage(msg)
 	}
+
+	s.logger.InfoLogger.Info("Finished handling messages.")
 }

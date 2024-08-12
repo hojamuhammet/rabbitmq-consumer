@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,7 +23,7 @@ func main() {
 
 	logInstance, err := logger.SetupLogger(cfg.Env)
 	if err != nil {
-		os.Exit(1)
+		log.Fatalf("Failed to set up logger: %v", err)
 	}
 
 	db, err := sql.Open("mysql", cfg.Database.Addr)
@@ -31,10 +32,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(5 * time.Minute)
 
 	repo := repository.NewSMSRepository(db, logInstance.ErrorLogger)
 	webSocketServer := websocket.NewWebSocketServer()
@@ -56,6 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	logInstance.InfoLogger.Info("Starting to handle messages...")
 	go smsService.HandleMessages(msgs)
 
 	server := &http.Server{

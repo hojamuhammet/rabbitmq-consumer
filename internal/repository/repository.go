@@ -51,6 +51,8 @@ func (r *smsRepository) FindOrCreateClientID(source string) (int64, error) {
 				r.logger.Error("Failed to get last insert id for clients", slog.Any("error", err))
 				return 0, err
 			}
+			// Log the client insertion
+			r.logger.Info("Inserted new client", slog.Int64("client_id", clientID), slog.String("phone", source))
 		} else {
 			r.logger.Error("Failed to query client", slog.Any("error", err))
 			return 0, err
@@ -74,6 +76,16 @@ func (r *smsRepository) InsertMessage(msg domain.SMSMessage, clientID, userID in
 		r.logger.Error("Failed to insert message into sms_messages table", slog.Any("error", err))
 		return err
 	}
+
+	// Log the message insertion
+	r.logger.Info("Message recorded in database",
+		slog.String("src", msg.Source),
+		slog.String("dst", msg.Destination),
+		slog.String("txt", msg.Text),
+		slog.String("date", msg.Date),
+		slog.Int64("client_id", clientID),
+		slog.Int64("user_id", userID),
+	)
 
 	return nil
 }

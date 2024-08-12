@@ -16,7 +16,7 @@ type AMQPConnection struct {
 	notifyConnClose chan *amqp.Error
 	notifyChanClose chan *amqp.Error
 	done            chan bool
-	url             string
+	cfg             *config.Config
 	smsService      service.SMSService
 	logInstance     *logger.Loggers
 	wsServer        *websocket.WebSocketServer
@@ -24,7 +24,7 @@ type AMQPConnection struct {
 
 func NewAMQPConnection(cfg *config.Config, smsService service.SMSService, logInstance *logger.Loggers, wsServer *websocket.WebSocketServer) *AMQPConnection {
 	return &AMQPConnection{
-		url:         cfg.RabbitMQ.URL,
+		cfg:         cfg,
 		done:        make(chan bool),
 		smsService:  smsService,
 		logInstance: logInstance,
@@ -35,7 +35,7 @@ func NewAMQPConnection(cfg *config.Config, smsService service.SMSService, logIns
 func (c *AMQPConnection) Connect() error {
 	var err error
 
-	c.conn, err = amqp.Dial(c.url)
+	c.conn, err = amqp.Dial(c.cfg.RabbitMQ.URL)
 	if err != nil {
 		return err
 	}
@@ -86,14 +86,17 @@ func (c *AMQPConnection) Close() {
 }
 
 func (c *AMQPConnection) ConsumeMessages() (<-chan amqp.Delivery, error) {
+	routingKey := c.cfg.RabbitMQ.Consumer.RoutingKey
+
+	// Declare exchange and queue for "extra.turkmentv"
 	err := c.channel.ExchangeDeclare(
-		"extra.turkmentv", // name
-		"direct",          // type
-		true,              // durable
-		false,             // auto-deleted
-		false,             // internal
-		false,             // no-wait
-		nil,               // arguments
+		c.cfg.RabbitMQ.Consumer.ExchangeName, // name
+		"direct",                             // type
+		true,                                 // durable
+		false,                                // auto-deleted
+		false,                                // internal
+		false,                                // no-wait
+		nil,                                  // arguments
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to declare an exchange", "error", err)
@@ -101,12 +104,12 @@ func (c *AMQPConnection) ConsumeMessages() (<-chan amqp.Delivery, error) {
 	}
 
 	queue, err := c.channel.QueueDeclare(
-		"extra.turkmentv", // name of the queue
-		true,              // durable
-		false,             // delete when unused
-		false,             // exclusive
-		false,             // no-wait
-		nil,               // arguments
+		c.cfg.RabbitMQ.Consumer.QueueName, // name of the queue
+		true,                              // durable
+		false,                             // delete when unused
+		false,                             // exclusive
+		false,                             // no-wait
+		nil,                               // arguments
 	)
 	if err != nil {
 		c.logInstance.ErrorLogger.Error("Failed to declare a queue", "error", err)
@@ -114,9 +117,9 @@ func (c *AMQPConnection) ConsumeMessages() (<-chan amqp.Delivery, error) {
 	}
 
 	err = c.channel.QueueBind(
-		queue.Name,        // queue name
-		"",                // routing key
-		"extra.turkmentv", // exchange
+		queue.Name,                           // queue name
+		routingKey,                           // routing key
+		c.cfg.RabbitMQ.Consumer.ExchangeName, // exchange
 		false,
 		nil,
 	)
